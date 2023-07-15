@@ -1,12 +1,26 @@
+#define _CRT_SECURE_NO_WARNINGS
+
 #include <cstdio>
 #include <cstring>
 #include <ctime>
 #include <csignal>
 #include <algorithm>
-#include <sys/time.h>
+
+#ifdef _WIN32
+#define NOMINMAX
+
+#include <windows.h>
+#include "ya_getopt.h"
+#else
 #include <getopt.h>
+#include <sys/time.h>
+#endif
 
 #include <lime/LimeSuite.h>
+
+#define STDIN  0
+#define STDOUT 1
+#define STDERR 2
 
 #define EXIT_CODE_CONTROL_C (SIGINT + 128)
 #define EXIT_CODE_NO_DEVICE (-2)
@@ -18,18 +32,64 @@
 #define MAX_DYNAMIC   2047
 
 #define ANTENNA_NONE  0
-#define ANTENNA_BAND1 1 // antenna with BW [2000MHz .. 2600MHz]
-#define ANTENNA_BAND2 2 // antenna with BW [  30MHz .. 1900MHz]
+#define ANTENNA_BAND1 1
+#define ANTENNA_BAND2 2
 #define ANTENNA_AUTO  3
 #define DEFAULT_ANTENNA ANTENNA_AUTO
 
 #define STRINGIFY2(X) #X
 #define STRINGIFY(X) STRINGIFY2(X)
 
+#ifdef _WIN32
+int gettimeofday(struct timeval* tp, struct timezone* tzp) {
+    // Note: some broken versions only have 8 trailing zero's, the correct epoch has 9 trailing zero's
+    // This magic number is the number of 100 nanosecond intervals since January 1, 1601 (UTC)
+    // until 00:00:00 January 1, 1970
+    static const uint64_t EPOCH = ((uint64_t)116444736000000000ULL);
+
+    SYSTEMTIME  system_time;
+    FILETIME    file_time;
+    uint64_t    time;
+
+    GetSystemTime(&system_time);
+    SystemTimeToFileTime(&system_time, &file_time);
+    time = ((uint64_t)file_time.dwLowDateTime);
+    time += ((uint64_t)file_time.dwHighDateTime) << 32;
+
+    tp->tv_sec = (long)((time - EPOCH) / 10000000L);
+    tp->tv_usec = (long)(system_time.wMilliseconds * 1000);
+    return 0;
+}
+#endif
+
+#ifdef _WIN32
+
+# include <io.h>
+# include <fcntl.h>
+# define SET_BINARY_MODE(handle) _setmode(handle, O_BINARY)
+#else
+# define SET_BINARY_MODE(handle) ((void)0)
+#endif
+
 static int control_c_received = 0;
+#ifdef _WIN32
+BOOL WINAPI control_c_handler(DWORD fdwCtrlType)
+{
+    switch (fdwCtrlType)
+    {
+    case CTRL_C_EVENT:
+    case CTRL_CLOSE_EVENT:
+        control_c_received = 1;
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+#else
 static void control_c_handler(int sig, siginfo_t *siginfo, void *context) {
     control_c_received = 1;
 }
+#endif
 
 static void print_usage(const char *program_name) {
     fprintf(stderr, "Usage: %s [option] < file" "\n"
@@ -47,7 +107,7 @@ static void print_usage(const char *program_name) {
     exit(0);
 }
 
-//Device structure, should be initialize to NULL
+//Device structure, should be initialize to nullptr
 lms_device_t *device = nullptr;
 
 int error(int exit_code) {
@@ -58,6 +118,11 @@ int error(int exit_code) {
 }
 
 int main(int argc, char *const argv[]) {
+#ifdef _WIN32
+    if (!SetConsoleCtrlHandler(control_c_handler, TRUE)) {
+        printf("Could not set control handler.\n");
+    }
+#else
     struct sigaction control_c{};
 
     memset(&control_c, 0, sizeof(control_c));
@@ -78,6 +143,9 @@ int main(int argc, char *const argv[]) {
         perror ("sigaction");
         return(EXIT_CODE_CONTROL_C);
     }
+#endif
+
+    SET_BINARY_MODE(STDIN);
 
     double gain = 1.0;
     int32_t antenna = DEFAULT_ANTENNA;
@@ -88,15 +156,15 @@ int main(int argc, char *const argv[]) {
     int32_t dynamic = 2047;
 
     static struct option long_options[] = {
-            {"gain",       required_argument, nullptr, 'g'},
-            {"channel",    required_argument, nullptr, 'c'},
-            {"antenna",    required_argument, nullptr, 'a'},
-            {"index",      required_argument, nullptr, 'i'},
-            {"bits",       required_argument, nullptr, 'b'},
-            {"samplerate", required_argument, nullptr, 's'},
-            {"dynamic",    required_argument, nullptr, 'd'},
-            {"help",       no_argument,       nullptr, 'h'},
-            {nullptr,      no_argument,       nullptr, '\0'}
+        {"gain",       required_argument, nullptr, 'g'},
+        {"channel",    required_argument, nullptr, 'c'},
+        {"antenna",    required_argument, nullptr, 'a'},
+        {"index",      required_argument, nullptr, 'i'},
+        {"bits",       required_argument, nullptr, 'b'},
+        {"samplerate", required_argument, nullptr, 's'},
+        {"dynamic",    required_argument, nullptr, 'd'},
+        {"help",       no_argument,       nullptr, 'h'},
+        {nullptr,      no_argument,       nullptr, '\0'}
     };
 
     while (true) {
@@ -157,8 +225,7 @@ int main(int argc, char *const argv[]) {
 
     // Use correct values
     // Use existing device
-    index = std::max(0, index);
-    if (index >= device_count) {
+    if (index < 0 || index >= device_count) {
         index = 0;
     }
     printf("Using device index %d [%s]" "\n", index, device_list[index]);
@@ -173,6 +240,7 @@ int main(int argc, char *const argv[]) {
     if (LMS_Open(&device, device_list[index], nullptr)) {
         error(EXIT_CODE_LMS_INIT);
     }
+    free(device_list);
 
     int lmsReset = LMS_Reset(device);
     if (lmsReset) {
@@ -187,30 +255,32 @@ int main(int argc, char *const argv[]) {
 
     int channel_count = LMS_GetNumChannels(device, LMS_CH_TX);
     printf("Tx channel count: %d" "\n", channel_count);
-    channel = std::max(0, channel);
-    if (channel >= channel_count) {
+    if (channel < 0 || channel >= channel_count) {
         channel = 0;
     }
     printf("Using channel: %d" "\n", channel);
 
     int antenna_count = LMS_GetAntennaList(device, LMS_CH_TX, channel, nullptr);
     printf("TX%d Channel has %d antenna(ae)" "\n", channel, antenna_count);
-    lms_name_t antenna_name[antenna_count];
+    if (antenna < 0 || antenna >= antenna_count) {
+        antenna = DEFAULT_ANTENNA;
+    }
+
+    lms_name_t* antenna_name = (lms_name_t*)malloc(sizeof(lms_name_t)*antenna_count);
+    lms_range_t antenna_bw{};
     if (antenna_count > 0) {
-        lms_range_t antenna_bw[antenna_count];
         LMS_GetAntennaList(device, LMS_CH_TX, channel, antenna_name);
         for(int i = 0 ; i < antenna_count ; i++) {
-            LMS_GetAntennaBW(device, LMS_CH_TX, channel, i, antenna_bw + i);
-            printf("Channel %d, antenna [%s] has BW [%lf .. %lf] (step %lf)" "\n", channel, antenna_name[i], antenna_bw[i].min, antenna_bw[i].max, antenna_bw[i].step);
+            LMS_GetAntennaBW(device, LMS_CH_TX, channel, i, &antenna_bw);
+            printf("Channel %d, antenna [%s] has BW [%lf .. %lf] (step %lf)" "\n", channel, antenna_name[i], antenna_bw.min, antenna_bw.max, antenna_bw.step);
+            if (ANTENNA_AUTO == antenna && antenna_bw.min < TX_FREQUENCY && TX_FREQUENCY < antenna_bw.max) {
+                antenna = i;
+            }
         }
     }
-    if (antenna < 0) {
-        antenna = DEFAULT_ANTENNA;
-    }
-    if (antenna >= antenna_count) {
-        antenna = DEFAULT_ANTENNA;
-    }
     printf("Using antenna %d: [%s]" "\n", antenna, antenna_name[antenna]);
+    free(antenna_name);
+
     // LMS_SetAntenna(device, LMS_CH_TX, channel, antenna); // SetLOFrequency should take care of selecting the proper antenna
     
     LMS_SetNormalizedGain(device, LMS_CH_TX, channel, gain);
@@ -282,13 +352,13 @@ int main(int argc, char *const argv[]) {
     }
 
     printf("Setup TX stream ..." "\n");
-    lms_stream_t tx_stream = {
-        .isTx = true,                         // TX channel
-        .channel = (uint32_t) channel,        // channel number
-        .fifoSize = 1024 * 1024,              // fifo size in samples
-        .throughputVsLatency = 0.5f,          // 0 min latency, 1 max throughput
-        .dataFmt = lms_stream_t::LMS_FMT_I12  // 12-bit signed integer samples
-    };
+    lms_stream_t tx_stream = {};
+    tx_stream.isTx = true;                         // TX channel
+    tx_stream.channel = (uint32_t)channel;         // channel number
+    tx_stream.fifoSize = 1024 * 1024;              // fifo size in samples
+    tx_stream.throughputVsLatency = 0.5f;          // 0 min latency, 1 max throughput
+    tx_stream.dataFmt = lms_stream_t::LMS_FMT_I12; // 12-bit signed integer samples
+
     int setupStream = LMS_SetupStream(device, &tx_stream);
     if (setupStream) {
         printf("setupStream=%d(%s)" "\n", setupStream, LMS_GetLastErrorMessage());
@@ -401,8 +471,7 @@ int main(int argc, char *const argv[]) {
     printf("Done.\n");
 
     if (control_c_received) {
-        return(EXIT_CODE_CONTROL_C);
+        return (EXIT_CODE_CONTROL_C);
     }
-    return(0);
+    return 0;
 }
-
