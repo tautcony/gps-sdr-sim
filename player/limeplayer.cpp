@@ -4,6 +4,7 @@
 #include <cstring>
 #include <ctime>
 #include <csignal>
+#include <string>
 #include <algorithm>
 
 #ifdef _WIN32
@@ -25,6 +26,8 @@
 #define STDIN  0
 #define STDOUT 1
 #define STDERR 2
+
+#define FD_BUFFER_SIZE 8*1024
 
 #define EXIT_CODE_CONTROL_C (SIGINT + 128)
 #define EXIT_CODE_INVALID_ARGUMENTS (-3)
@@ -97,6 +100,7 @@ static void print_usage(const char *program_name) {
             "\t" "-b, --bits <bits>       configure IQ sample bit depth in { 1, 8, 12, 16 } (default: 16)" "\n"
             "\t" "-c, --channel <channel> select channel index in { 0, 1 } (default: 0)" "\n"
             "\t" "-d, --dynamic <dynamic> configure dynamic for the 1-bit mode (default: " STRINGIFY(MAX_DYNAMIC) ", max 12-bit signed value supported by LimeSDR)" "\n"
+            "\t" "-f, --file <file>       read IQ samples from file instead of stdin" "\n"
             "\t" "-g, --gain <gain>       configure the so-called normalized RF gain in [0.0 .. 1.0] (default: 1.0 max RF power)" "\n"
             "\t" "-h, --help              print this help message" "\n"
             "\t" "-i, --index <index>     select specific LimeSDR device if multiple devices connected (default: 0)" "\n"
@@ -108,12 +112,15 @@ static void print_usage(const char *program_name) {
     exit(0);
 }
 
-//Device structure, should be initialize to nullptr
 lms_device_t *device = nullptr;
+FILE* input_stream = nullptr;
 
 int error(int exit_code) {
     if (device != nullptr) {
         LMS_Close(device);
+    }
+    if (input_stream != stdin) {
+        fclose(input_stream);
     }
     exit(exit_code);
 }
@@ -154,8 +161,6 @@ int main(int argc, char *const argv[]) {
     }
 #endif
 
-    SET_BINARY_MODE(STDIN);
-
     double gain = 1.0;
     int32_t antenna = DEFAULT_ANTENNA;
     int32_t channel = 0;
@@ -163,12 +168,14 @@ int main(int argc, char *const argv[]) {
     int32_t bits = 16;
     double sampleRate = TX_SAMPLERATE;
     int32_t dynamic = 2047;
+    std::string path;
 
     static struct option long_options[] = {
         {"antenna",    required_argument, nullptr, 'a'},
         {"bits",       required_argument, nullptr, 'b'},
         {"channel",    required_argument, nullptr, 'c'},
         {"dynamic",    required_argument, nullptr, 'd'},
+        {"file",       required_argument, nullptr, 'f'},
         {"gain",       required_argument, nullptr, 'g'},
         {"help",       no_argument,       nullptr, 'h'},
         {"index",      required_argument, nullptr, 'i'},
@@ -178,7 +185,7 @@ int main(int argc, char *const argv[]) {
 
     while (true) {
         int option_index = 0;
-        int c = getopt_long(argc, argv, "a:b:c:d:g:hi:s:", long_options, &option_index);
+        int c = getopt_long(argc, argv, "a:b:c:d:f:g:hi:s:", long_options, &option_index);
         if (c == -1) break;
 
         char *endptr = nullptr;
@@ -187,6 +194,7 @@ int main(int argc, char *const argv[]) {
             case 'b': bits       = (int32_t) strtol(optarg, &endptr, 10); break;
             case 'c': channel    = (int32_t) strtol(optarg, &endptr, 10); break;
             case 'd': dynamic    = (int32_t) strtol(optarg, &endptr, 10); break;
+            case 'f': path       = std::string(optarg);                   break;
             case 'g': gain       =           strtod(optarg, &endptr);     break;
             case 'h': print_usage(argv[0]);                               break;
             case 'i': index      = (int32_t) strtol(optarg, &endptr, 10); break;
@@ -195,6 +203,17 @@ int main(int argc, char *const argv[]) {
         if (endptr != nullptr && *endptr != '\0') {
             fprintf(stderr, "Failed to parse argument for option -%c => %s\n", c, optarg);
             exit(EXIT_CODE_INVALID_ARGUMENTS);
+        }
+    }
+
+    if (path.empty()) {
+        input_stream = stdin;
+        SET_BINARY_MODE(STDIN);
+    } else {
+        input_stream = fopen(path.c_str(), "rb");
+        if (input_stream == nullptr) {
+            fprintf(stderr, "fopen() failed: %s\n", path.c_str());
+            error(EXIT_CODE_INVALID_ARGUMENTS);
         }
     }
 
@@ -401,12 +420,12 @@ int main(int argc, char *const argv[]) {
     int sampleCount = 0;
     while (0 == control_c_received) {
         if (12 == bits || 16 == bits) {
-            sampleCount = (int) fread(sampleBuffer, sizeof(s16iq_sample_s), nSamples, stdin);
+            sampleCount = (int) fread(sampleBuffer, sizeof(s16iq_sample_s), nSamples, input_stream);
             if (0 == sampleCount) {
                 break;
             }
         } else if (8 == bits) {
-            sampleCount = (int) fread(fileBuffer8bit, sizeof(s8iq_sample_s), nSamples, stdin);
+            sampleCount = (int) fread(fileBuffer8bit, sizeof(s8iq_sample_s), nSamples, input_stream);
             if (0 == sampleCount) {
                 break;
             }
@@ -416,7 +435,7 @@ int main(int argc, char *const argv[]) {
                 sampleBuffer[i].q = fileBuffer8bit[i].q << 4;
             }
         } else if (1 == bits) {
-            sampleCount = (int) fread(fileBuffer1bit, sizeof(iq_4_sample_s), nSamples / 4, stdin);
+            sampleCount = (int) fread(fileBuffer1bit, sizeof(iq_4_sample_s), nSamples / 4, input_stream);
             if (0 == sampleCount) {
                 break;
             }
@@ -434,6 +453,9 @@ int main(int argc, char *const argv[]) {
     }
 
     printf("Releasing resources...\n");
+    if (input_stream != stdin) {
+        fclose(input_stream);
+    }
     free(sampleBuffer);
     free(fileBuffer8bit);
     free(fileBuffer1bit);
