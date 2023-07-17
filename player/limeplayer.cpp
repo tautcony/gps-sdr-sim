@@ -7,16 +7,20 @@
 #include <algorithm>
 
 #ifdef _WIN32
-#define NOMINMAX
-
-#include <windows.h>
 #include "ya_getopt.h"
 #else
 #include <getopt.h>
-#include <sys/time.h>
 #endif
 
 #include <lime/LimeSuite.h>
+
+#ifdef _WIN32
+#include <io.h>
+#include <fcntl.h>
+#define SET_BINARY_MODE(handle) _setmode(handle, O_BINARY)
+#else
+#define SET_BINARY_MODE(handle) ((void)0)
+#endif
 
 #define STDIN  0
 #define STDOUT 1
@@ -41,6 +45,8 @@
 #define STRINGIFY(X) STRINGIFY2(X)
 
 #ifdef _WIN32
+#define NOMINMAX
+#include <windows.h>
 int gettimeofday(struct timeval* tp, struct timezone* tzp) {
     // Note: some broken versions only have 8 trailing zero's, the correct epoch has 9 trailing zero's
     // This magic number is the number of 100 nanosecond intervals since January 1, 1601 (UTC)
@@ -60,15 +66,8 @@ int gettimeofday(struct timeval* tp, struct timezone* tzp) {
     tp->tv_usec = (long)(system_time.wMilliseconds * 1000);
     return 0;
 }
-#endif
-
-#ifdef _WIN32
-
-# include <io.h>
-# include <fcntl.h>
-# define SET_BINARY_MODE(handle) _setmode(handle, O_BINARY)
 #else
-# define SET_BINARY_MODE(handle) ((void)0)
+#include <sys/time.h>
 #endif
 
 static int control_c_received = 0;
@@ -93,14 +92,15 @@ static void control_c_handler(int sig, siginfo_t *siginfo, void *context) {
 
 static void print_usage(const char *program_name) {
     fprintf(stderr, "Usage: %s [option] < file" "\n"
-            "\t" "-g <gain> or --gain <gain> with gain in [0.0 .. 1.0] set the so-called normalized RF gain in LimeSDR (default: 1.0 max RF power)" "\n"
-            "\t" "-c <channel> or --channel <channel> with channel either 0 or 1 (default: 0)" "\n"
-            "\t" "-a <antenna> or --antenna <antenna> with antenna in { 0, 1, 2, 3 } (default:" STRINGIFY(DEFAULT_ANTENNA) ")" "\n"
-            "\t" "-i <index> or --index <index> select LimeSDR if multiple devices connected (default: 0)" "\n"
-            "\t" "-b <bits> or --bits <bits> select bit count in IQ sample in { 1, 8, 12, 16 }, (default: 16)" "\n"
-            "\t" "-s <samplerate> or --samplerate <samplerate> configure BB sample rate (default: " STRINGIFY(TX_SAMPLERATE) ")" "\n"
-            "\t" "-d <dynamic> --dynamic <dynamic> configure dynamic for the 1-bit mode (default: " STRINGIFY(MAX_DYNAMIC) ", max 12-bit signed value supported by LimeSDR)" "\n"
-            "\t" "-h or --help print this help message" "\n"
+            "\t" "-i, --index <index>     select specific LimeSDR device if multiple devices connected (default: 0)" "\n"
+            "\t" "-a, --antenna <antenna> select antenna index in { 0, 1, 2, 3 } (default: " STRINGIFY(DEFAULT_ANTENNA) ")" "\n"
+            "\t" "-c, --channel <channel> select channel index in { 0, 1 } (default: 0)" "\n"
+            "\t" "-g, --gain <gain>       configure the so-called normalized RF gain in [0.0 .. 1.0] (default: 1.0 max RF power)" "\n"
+            "\t" "-b, --bits <bits>       configure IQ sample bit depth in { 1, 8, 12, 16 } (default: 16)" "\n"
+            "\t" "-s, --samplerate <samplerate>" "\n"
+            "\t" "                        configure sampling rate for TX channels (default: " STRINGIFY(TX_SAMPLERATE) ")" "\n"
+            "\t" "-d, --dynamic <dynamic> configure dynamic for the 1-bit mode (default: " STRINGIFY(MAX_DYNAMIC) ", max 12-bit signed value supported by LimeSDR)" "\n"
+            "\t" "-h, --help              print this help message" "\n"
         "Example:" "\n"
         "\t" "./limeplayer -s 1000000 -b 1 -d 1023 -g 0.1 < ../circle.1b.1M.bin" "\n",
             program_name);
@@ -132,16 +132,16 @@ int main(int argc, char *const argv[]) {
     control_c.sa_flags = SA_SIGINFO;
  
     if (sigaction(SIGTERM, &control_c, nullptr) < 0) {
-        perror ("sigaction");
-        return(EXIT_CODE_CONTROL_C);
+        perror("sigaction");
+        return (EXIT_CODE_CONTROL_C);
     }
     if (sigaction(SIGQUIT, &control_c, nullptr) < 0) {
-        perror ("sigaction");
-        return(EXIT_CODE_CONTROL_C);
+        perror("sigaction");
+        return (EXIT_CODE_CONTROL_C);
     }
     if (sigaction(SIGINT, &control_c, nullptr) < 0) {
-        perror ("sigaction");
-        return(EXIT_CODE_CONTROL_C);
+        perror("sigaction");
+        return (EXIT_CODE_CONTROL_C);
     }
 #endif
 
