@@ -205,9 +205,10 @@ int main(int argc, char *const argv[]) {
     }
     auto *device_list = (lms_info_str_t *) malloc(sizeof(lms_info_str_t) * device_count);
     device_count = LMS_GetDeviceList(device_list);
-
-    for (int i = 0; i < device_count; ++i) {
-        printf("device[%d/%d]=%s" "\n", i + 1, device_count, device_list[i]);
+    if (device_list != nullptr) {
+        for (int i = 0; i < device_count; ++i) {
+            printf("device[%d/%d]=%s" "\n", i + 1, device_count, device_list[i]);
+        }
     }
 
     // Use correct values
@@ -253,7 +254,7 @@ int main(int argc, char *const argv[]) {
         antenna = DEFAULT_ANTENNA;
     }
 
-    lms_name_t* antenna_name = (lms_name_t*)malloc(sizeof(lms_name_t)*antenna_count);
+    lms_name_t* antenna_name = (lms_name_t*)malloc(sizeof(lms_name_t) * antenna_count);
     lms_range_t antenna_bw{};
     if (antenna_count > 0) {
         LMS_GetAntennaList(device, LMS_CH_TX, channel, antenna_name);
@@ -288,14 +289,11 @@ int main(int argc, char *const argv[]) {
     }
 
 #ifdef __USE_LPF__
-    lms_range_t LPFBWRange;
+    lms_range_t LPFBWRange{};
     LMS_GetLPFBWRange(device, LMS_CH_TX, &LPFBWRange);
     printf("TX%d LPFBW [%lf .. %lf] (step %lf)" "\n", channel, LPFBWRange.min, LPFBWRange.max, LPFBWRange.step);
     double LPFBW = TX_BANDWIDTH;
-    if (LPFBW < LPFBWRange.min) {
-        LPFBW = LPFBWRange.min;
-    }
-    if (LPFBW > LPFBWRange.max) {
+    if (LPFBW < LPFBWRange.min || LPFBW > LPFBWRange.max) {
         LPFBW = LPFBWRange.min;
     }
     int setLPFBW = LMS_SetLPFBW(device, LMS_CH_TX, channel, LPFBW);
@@ -308,15 +306,15 @@ int main(int argc, char *const argv[]) {
     }
 #endif
 
-    lms_range_t sampleRateRange;
+    lms_range_t sampleRateRange{};
     int getSampleRateRange = LMS_GetSampleRateRange(device, LMS_CH_TX, &sampleRateRange);
     if (getSampleRateRange) {
         printf("getSampleRateRange=%d(%s)" "\n", getSampleRateRange, LMS_GetLastErrorMessage());
     } else {
-        printf("sampleRateRange [%lf MHz.. %lf MHz] (step=%lf Hz)" "\n", sampleRateRange.min / 1e6, sampleRateRange.max / 1e6, sampleRateRange.step);
+        printf("SampleRateRange: [%lf MHz .. %lf MHz] (step=%lf Hz)" "\n", sampleRateRange.min / 1e6, sampleRateRange.max / 1e6, sampleRateRange.step);
     }
 
-    printf("Set sample rate to %lf ..." "\n", sampleRate);
+    printf("Set sample rate to %lf Hz ..." "\n", sampleRate);
     int setSampleRate = LMS_SetSampleRate(device, sampleRate, 0);
     if (setSampleRate) {
         printf("setSampleRate=%d(%s)" "\n", setSampleRate, LMS_GetLastErrorMessage());
@@ -328,7 +326,7 @@ int main(int argc, char *const argv[]) {
     if (getSampleRate) {
         printf("getSampleRate=%d(%s)" "\n", getSampleRate, LMS_GetLastErrorMessage());
     } else {
-        printf("actualRate %lf (Host) / %lf (RF)" "\n", actualHostSampleRate, actualRFSampleRate);
+        printf("actualRate %lf Hz (Host) / %lf Hz (RF)" "\n", actualHostSampleRate, actualRFSampleRate);
     }
 
     printf("Calibrating ..." "\n");
@@ -375,7 +373,7 @@ int main(int argc, char *const argv[]) {
     int64_t loop_step = 0;
     auto print_progress = [&]() {
         if (0 != (loop_step++ % 100)) return;
-        struct timeval tv{};
+        struct timeval tv {};
         char tm_buf[64];
 
         gettimeofday(&tv, nullptr);
@@ -388,12 +386,12 @@ int main(int argc, char *const argv[]) {
 #else
         printf("gettimeofday() => %s.%06ld ; ", tm_buf, tv.tv_usec);
 #endif
-        lms_stream_status_t status;
-        LMS_GetStreamStatus(&tx_stream, &status); //Obtain TX stream stats
-        printf("TX rate: %lf MiB/s" "\n", status.linkRate / (1<<20));
+        lms_stream_status_t status{};
+        LMS_GetStreamStatus(&tx_stream, &status); // Obtain TX stream stats
+        printf("TX rate: %lf MiB/s" "\n", status.linkRate / (1LL << 20));
     };
 
-    int16_t expand_lut[1<<8][8];
+    int16_t expand_lut[1 << 8][8] = {};
     for (int i = 0; i < 256; i++) {
         for (int j = 0; j < 8; j++) {
             expand_lut[i][j] = (int16_t)(((i >> (7 - j)) & 0x1) ? dynamic : -dynamic);
@@ -403,12 +401,12 @@ int main(int argc, char *const argv[]) {
     int sampleCount = 0;
     while (0 == control_c_received) {
         if (12 == bits || 16 == bits) {
-            sampleCount = fread(sampleBuffer, sizeof(s16iq_sample_s), nSamples, stdin);
+            sampleCount = (int) fread(sampleBuffer, sizeof(s16iq_sample_s), nSamples, stdin);
             if (0 == sampleCount) {
                 break;
             }
         } else if (8 == bits) {
-            sampleCount = fread(fileBuffer8bit, sizeof(s8iq_sample_s), nSamples, stdin);
+            sampleCount = (int) fread(fileBuffer8bit, sizeof(s8iq_sample_s), nSamples, stdin);
             if (0 == sampleCount) {
                 break;
             }
@@ -418,7 +416,7 @@ int main(int argc, char *const argv[]) {
                 sampleBuffer[i].q = fileBuffer8bit[i].q << 4;
             }
         } else if (1 == bits) {
-            sampleCount = fread(fileBuffer1bit, sizeof(iq_4_sample_s), nSamples / 4, stdin);
+            sampleCount = (int) fread(fileBuffer1bit, sizeof(iq_4_sample_s), nSamples / 4, stdin);
             if (0 == sampleCount) {
                 break;
             }
