@@ -392,7 +392,11 @@ int main(int argc, char *const argv[]) {
         auto current_tm = localtime(&current_time);
         strftime(tm_buf, sizeof tm_buf, "%Y-%m-%d %H:%M:%S", current_tm);
 
+#ifdef __APPLE__
         printf("gettimeofday() => %s.%06d ; ", tm_buf, tv.tv_usec);
+#else
+        printf("gettimeofday() => %s.%06ld ; ", tm_buf, tv.tv_usec);
+#endif
         lms_stream_status_t status;
         LMS_GetStreamStatus(&tx_stream, &status); //Obtain TX stream stats
         printf("TX rate: %lf MiB/s" "\n", status.linkRate / (1<<20));
