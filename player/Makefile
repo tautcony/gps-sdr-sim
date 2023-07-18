@@ -20,7 +20,7 @@ hackplayer: hackplayer.o $(COMPAT)
 	$(CC) -g -o $@ $^ $(LDFLAGS) $(LIBS) $(shell pkg-config --libs libhackrf)
 
 limeplayer: limeplayer.cpp
-	$(CC) $(CXXFLAGS) -g -o $@ $^ $(LDFLAGS) $(LIBS) $(shell pkg-config --cflags limesuite) $(shell pkg-config --libs limesuite)
+	$(CC) $(CXXFLAGS) -g -o $@ $^ $(LDFLAGS) $(LIBS) -lc++ $(shell pkg-config --cflags limesuite) $(shell pkg-config --libs limesuite)
 
 plutoplayer: plutoplayer.o $(COMPAT)
 	$(CC) -g -o $@ $^ $(LDFLAGS) $(LIBS) $(shell pkg-config --libs libiio libad9361)
