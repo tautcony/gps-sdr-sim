@@ -249,18 +249,20 @@ int main(int argc, char *const argv[]) {
     }
     free(device_list);
 
-    int lmsReset = LMS_Reset(device);
-    if (lmsReset) {
-        printf("lmsReset %d(%s)" "\n", lmsReset, LMS_GetLastErrorMessage());
+    if (LMS_Reset(device)) {
+        printf("lmsReset (%s)" "\n", LMS_GetLastErrorMessage());
         error(EXIT_CODE_LMS_INIT);
     }
-    int lmsInit = LMS_Init(device);
-    if (lmsInit) {
-        printf("lmsInit %d(%s)" "\n", lmsInit, LMS_GetLastErrorMessage());
+    if (LMS_Init(device)) {
+        printf("lmsInit (%s)" "\n", LMS_GetLastErrorMessage());
         error(EXIT_CODE_LMS_INIT);
     }
 
     int channel_count = LMS_GetNumChannels(device, LMS_CH_TX);
+    if (channel_count < 0) {
+        printf("LMS_GetNumChannels (%s)" "\n", LMS_GetLastErrorMessage());
+        error(EXIT_CODE_LMS_INIT);
+    }
     printf("Tx channel count: %d" "\n", channel_count);
     if (channel < 0 || channel >= channel_count) {
         channel = 0;
@@ -268,6 +270,10 @@ int main(int argc, char *const argv[]) {
     printf("Using channel: %d" "\n", channel);
 
     int antenna_count = LMS_GetAntennaList(device, LMS_CH_TX, channel, nullptr);
+    if (antenna_count < 0) {
+        printf("LMS_GetAntennaList (%s)" "\n", LMS_GetLastErrorMessage());
+        error(EXIT_CODE_LMS_INIT);
+    }
     printf("TX%d Channel has %d antenna(ae)" "\n", channel, antenna_count);
     if (antenna < 0 || antenna >= antenna_count) {
         antenna = DEFAULT_ANTENNA;
@@ -280,7 +286,9 @@ int main(int argc, char *const argv[]) {
         for(int i = 0 ; i < antenna_count ; i++) {
             LMS_GetAntennaBW(device, LMS_CH_TX, channel, i, &antenna_bw);
             printf("Channel %d, antenna [%s] has BW [%lf .. %lf] (step %lf)" "\n", channel, antenna_name[i], antenna_bw.min, antenna_bw.max, antenna_bw.step);
-            if (ANTENNA_AUTO == antenna && antenna_bw.min < TX_FREQUENCY && TX_FREQUENCY < antenna_bw.max) {
+            if (ANTENNA_AUTO >= antenna_count &&
+                ANTENNA_AUTO == antenna &&
+                antenna_bw.min < TX_FREQUENCY && TX_FREQUENCY < antenna_bw.max) {
                 antenna = i;
             }
         }
@@ -301,9 +309,8 @@ int main(int argc, char *const argv[]) {
     LMS_EnableChannel(device, LMS_CH_RX, channel, true);
     LMS_EnableChannel(device, LMS_CH_TX, channel, true);
 
-    int setLOFrequency = LMS_SetLOFrequency(device, LMS_CH_TX, channel, TX_FREQUENCY);
-    if (setLOFrequency) {
-        printf("setLOFrequency(%lf)=%d(%s)" "\n", TX_FREQUENCY, setLOFrequency, LMS_GetLastErrorMessage());
+    if (LMS_SetLOFrequency(device, LMS_CH_TX, channel, TX_FREQUENCY)) {
+        printf("setLOFrequency(%lf)=(%s)" "\n", TX_FREQUENCY, LMS_GetLastErrorMessage());
         error(EXIT_CODE_LMS_INIT);
     }
 
@@ -315,43 +322,37 @@ int main(int argc, char *const argv[]) {
     if (LPFBW < LPFBWRange.min || LPFBW > LPFBWRange.max) {
         LPFBW = LPFBWRange.min;
     }
-    int setLPFBW = LMS_SetLPFBW(device, LMS_CH_TX, channel, LPFBW);
-    if (setLPFBW) {
-        printf("setLPFBW(%lf)=%d(%s)" "\n", LPFBW, setLPFBW, LMS_GetLastErrorMessage());
+    if (LMS_SetLPFBW(device, LMS_CH_TX, channel, LPFBW)) {
+        printf("setLPFBW(%lf)=%d(%s)" "\n", LPFBW, LMS_GetLastErrorMessage());
     }
-    int enableLPF = LMS_SetLPF(device, LMS_CH_TX, channel, true);
-    if (enableLPF) {
-        printf("enableLPF=%d(%s)" "\n", enableLPF, LMS_GetLastErrorMessage());
+    if (LMS_SetLPF(device, LMS_CH_TX, channel, true)) {
+        printf("enableLPF=(%s)" "\n", LMS_GetLastErrorMessage());
     }
 #endif
 
     lms_range_t sampleRateRange{};
-    int getSampleRateRange = LMS_GetSampleRateRange(device, LMS_CH_TX, &sampleRateRange);
-    if (getSampleRateRange) {
-        printf("getSampleRateRange=%d(%s)" "\n", getSampleRateRange, LMS_GetLastErrorMessage());
+    if (LMS_GetSampleRateRange(device, LMS_CH_TX, &sampleRateRange)) {
+        printf("getSampleRateRange=(%s)" "\n", LMS_GetLastErrorMessage());
     } else {
         printf("SampleRateRange: [%lf MHz .. %lf MHz] (step=%lf Hz)" "\n", sampleRateRange.min / 1e6, sampleRateRange.max / 1e6, sampleRateRange.step);
     }
 
     printf("Set sample rate to %lf Hz ..." "\n", sampleRate);
-    int setSampleRate = LMS_SetSampleRate(device, sampleRate, 0);
-    if (setSampleRate) {
-        printf("setSampleRate=%d(%s)" "\n", setSampleRate, LMS_GetLastErrorMessage());
+    if (LMS_SetSampleRate(device, sampleRate, 0)) {
+        printf("setSampleRate=(%s)" "\n", LMS_GetLastErrorMessage());
         error(EXIT_CODE_LMS_INIT);
     }
     double actualHostSampleRate = 0.0;
     double actualRFSampleRate = 0.0;
-    int getSampleRate = LMS_GetSampleRate(device, LMS_CH_TX, channel, &actualHostSampleRate, &actualRFSampleRate);
-    if (getSampleRate) {
-        printf("getSampleRate=%d(%s)" "\n", getSampleRate, LMS_GetLastErrorMessage());
+    if (LMS_GetSampleRate(device, LMS_CH_TX, channel, &actualHostSampleRate, &actualRFSampleRate)) {
+        printf("getSampleRate=(%s)" "\n", LMS_GetLastErrorMessage());
     } else {
         printf("actualRate %lf Hz (Host) / %lf Hz (RF)" "\n", actualHostSampleRate, actualRFSampleRate);
     }
 
     printf("Calibrating ..." "\n");
-    int calibrate = LMS_Calibrate(device, LMS_CH_TX, channel, TX_BANDWIDTH, 0);
-    if (calibrate) {
-        printf("calibrate=%d(%s)" "\n", calibrate, LMS_GetLastErrorMessage());
+    if (LMS_Calibrate(device, LMS_CH_TX, channel, TX_BANDWIDTH, 0)) {
+        printf("calibrate=(%s)" "\n", LMS_GetLastErrorMessage());
         error(EXIT_CODE_LMS_INIT);
     }
 
@@ -369,20 +370,18 @@ int main(int argc, char *const argv[]) {
     tx_meta.waitForTimestamp = true;               // wait for HW timestamp to send samples
     tx_meta.flushPartialPacket = false;            // send samples to HW after packet is completely filled
 
-    int setupStream = LMS_SetupStream(device, &tx_stream);
-    if (setupStream) {
-        printf("setupStream=%d(%s)" "\n", setupStream, LMS_GetLastErrorMessage());
+    if (LMS_SetupStream(device, &tx_stream)) {
+        printf("setupStream=(%s)" "\n", LMS_GetLastErrorMessage());
         error(EXIT_CODE_LMS_INIT);
     }
-    int startStream = LMS_StartStream(&tx_stream);
-    if (startStream) {
-        printf("startStream=%d(%s)" "\n", startStream, LMS_GetLastErrorMessage());
+    if (LMS_StartStream(&tx_stream)) {
+        printf("startStream=(%s)" "\n", LMS_GetLastErrorMessage());
         error(EXIT_CODE_LMS_INIT);
     }
 
     int nSamples = (int)(sampleRate / 100);
     if (1 == bits) {
-        // trim extra samples in 1bit mode
+        // trim extra samples in 1-bit mode
         nSamples -= nSamples % 4;
     }
     auto sampleBuffer   = (s16iq_sample_s*)malloc(sizeof(s16iq_sample_s) * nSamples);
@@ -406,7 +405,9 @@ int main(int argc, char *const argv[]) {
         printf("gettimeofday() => %s.%06ld ; ", tm_buf, tv.tv_usec);
 #endif
         lms_stream_status_t status{};
-        LMS_GetStreamStatus(&tx_stream, &status); // Obtain TX stream stats
+        if (LMS_GetStreamStatus(&tx_stream, &status)) {
+
+        }
         printf("TX rate: %lf MiB/s" "\n", status.linkRate / (1LL << 20));
     };
 
@@ -416,6 +417,9 @@ int main(int argc, char *const argv[]) {
             expand_lut[i][j] = (int16_t)(((i >> (7 - j)) & 0x1) ? dynamic : -dynamic);
         }
     }
+
+    double transmitBandwidth = sampleRate * (bits == 16 ? 16 : 12) * 2 / 8 / (1LL << 20);
+    printf("transmit bit mode: %d-bit, sample rate: %lf Hz, expected bandwidth: %lf MiB/s" "\n", bits, sampleRate, transmitBandwidth);
 
     int sampleCount = 0;
     while (0 == control_c_received) {
@@ -445,16 +449,19 @@ int main(int argc, char *const argv[]) {
             sampleCount *= 4;
         }
         print_progress();
-        int sentSampleCount = LMS_SendStream(&tx_stream, sampleBuffer, sampleCount, &tx_meta, 1000);
+        int sentSampleCount = LMS_SendStream(&tx_stream, sampleBuffer, sampleCount, nullptr, 1000);
         if (sentSampleCount < 0) {
-            printf("LMS_SendStream: %d(%s)" "\n", sentSampleCount, LMS_GetLastErrorMessage());
+            printf("LMS_SendStream: (%s)" "\n", LMS_GetLastErrorMessage());
         }
         tx_meta.timestamp += sentSampleCount;
     }
 
+    printf("Total transmit duration: %lfs\n", tx_meta.timestamp / sampleRate);
+
     printf("Releasing resources...\n");
     if (input_stream != stdin) {
         fclose(input_stream);
+        input_stream = nullptr;
     }
     free(sampleBuffer);
     free(fileBuffer8bit);
